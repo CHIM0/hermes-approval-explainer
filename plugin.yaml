@@ -1,0 +1,11 @@
+name: approval-explainer
+version: "0.1.0"
+description: "Explain dangerous command approval requests in Chinese before Hermes asks the user to accept or deny."
+author: "local"
+kind: standalone
+hooks:
+  - pre_llm_call
+  - post_api_request
+  - pre_tool_call
+  - pre_approval_request
+  - post_approval_response

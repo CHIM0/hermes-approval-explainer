@@ -1,0 +1,24 @@
+# approval-explainer local config
+#
+# provider/model are optional. By default the plugin uses Hermes' active model.
+# To pin a model, Hermes also requires opt-in in ~/.hermes/config.yaml:
+#
+# plugins:
+#   entries:
+#     approval-explainer:
+#       llm:
+#         allow_provider_override: true
+#         allowed_providers: ["deepseek"]
+#         allow_model_override: true
+#         allowed_models: ["deepseek-v4-flash"]
+
+language: "简体中文"
+bullet_count: "3-5"
+max_bullet_chars: 45
+max_tokens: 260
+temperature: 0.1
+timeout: 8
+provider: ""
+model: ""
+include_session_metadata: false
+skip_repeated_after_accept: true
