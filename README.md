@@ -23,13 +23,13 @@ approval decision and the user still responds to the normal approval prompt.
 Install directly from GitHub:
 
 ```bash
-hermes plugins install owner/hermes-approval-explainer --enable
+hermes plugins install CHIM0/hermes-approval-explainer --enable
 ```
 
 Or install from a full Git URL:
 
 ```bash
-hermes plugins install https://github.com/owner/hermes-approval-explainer --enable
+hermes plugins install https://github.com/CHIM0/hermes-approval-explainer --enable
 ```
 
 Then restart Hermes / the Hermes gateway so hooks are loaded.
