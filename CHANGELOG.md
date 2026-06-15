@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.2
+
+- Improve Windows notification diagnostics by recording PowerShell stdout/stderr in JSONL logs.
+- Make the Windows balloon fallback more reliable when BurntToast is not installed.
+- Record the concrete Windows notification method as `burnt_toast` or `windows_balloon`.
+
 ## 1.1.1
 
 - Add `llm_wall_timeout` so slow auxiliary-model fallback does not block the approval prompt.

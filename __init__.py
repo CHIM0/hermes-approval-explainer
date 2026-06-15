@@ -622,17 +622,20 @@ if ($UseBurntToast -eq "1" -and (Get-Module -ListAvailable -Name BurntToast)) {
   } else {
     New-BurntToastNotification -Text $Title, $Message
   }
+  Write-Output "method=burnt_toast"
   exit 0
 }
 Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
 $notify = New-Object System.Windows.Forms.NotifyIcon
 $notify.Icon = [System.Drawing.SystemIcons]::Information
 $notify.BalloonTipTitle = $Title
 $notify.BalloonTipText = $Message
 $notify.Visible = $true
 $notify.ShowBalloonTip(10000)
-Start-Sleep -Milliseconds 700
+Start-Sleep -Seconds 10
 $notify.Dispose()
+Write-Output "method=windows_balloon"
 '''
     result = _run_notification_command(
         [
@@ -646,31 +649,48 @@ $notify.Dispose()
             body,
             open_url,
             "1" if use_burnt_toast else "0",
-        ]
+        ],
+        timeout=15,
     )
-    result["method"] = "powershell"
-    result["click_action"] = "open_url_button" if open_url and use_burnt_toast else "none"
+    stdout = str(result.get("stdout") or "")
+    if "method=burnt_toast" in stdout:
+        result["method"] = "burnt_toast"
+        result["click_action"] = "open_url_button" if open_url else "none"
+    elif "method=windows_balloon" in stdout:
+        result["method"] = "windows_balloon"
+        result["click_action"] = "none"
+    else:
+        result["method"] = "powershell"
+        result["click_action"] = "unknown"
     return result
 
 
-def _run_notification_command(args: list[str]) -> dict[str, Any]:
+def _run_notification_command(args: list[str], timeout: float = 5) -> dict[str, Any]:
     try:
         completed = subprocess.run(
             args,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=5,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=timeout,
             check=False,
         )
     except FileNotFoundError:
         return {"ok": False, "status": "missing_command", "command": Path(args[0]).name}
     except Exception as exc:
         return {"ok": False, "status": "error", "error": f"{type(exc).__name__}: {exc}"}
-    return {
+    result = {
         "ok": completed.returncode == 0,
         "status": "sent" if completed.returncode == 0 else "failed",
         "returncode": completed.returncode,
     }
+    stdout = (completed.stdout or "").strip()
+    stderr = (completed.stderr or "").strip()
+    if stdout:
+        result["stdout"] = _redact_and_truncate(stdout, 500)
+    if stderr:
+        result["stderr"] = _redact_and_truncate(stderr, 500)
+    return result
 
 
 def _applescript_string(value: str) -> str:
