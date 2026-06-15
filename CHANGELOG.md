@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.3
+
+- Fix Windows notification argument passing so balloon fallback receives a non-empty message.
+
 ## 1.1.2
 
 - Improve Windows notification diagnostics by recording PowerShell stdout/stderr in JSONL logs.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import queue
@@ -611,10 +612,29 @@ def _notify_windows(title: str, body: str, config: dict[str, Any]) -> dict[str, 
     windows_config = config.get("windows") if isinstance(config.get("windows"), dict) else {}
     open_url = str(config.get("open_url") or "").strip()
     use_burnt_toast = bool(windows_config.get("prefer_burnt_toast", True))
+    payload = base64.b64encode(
+        json.dumps(
+            {
+                "title": title,
+                "message": body,
+                "open_url": open_url,
+                "use_burnt_toast": use_burnt_toast,
+            },
+            ensure_ascii=False,
+        ).encode("utf-8")
+    ).decode("ascii")
     script = r'''
-param([string]$Title, [string]$Message, [string]$OpenUrl, [string]$UseBurntToast)
 $ErrorActionPreference = "Stop"
-if ($UseBurntToast -eq "1" -and (Get-Module -ListAvailable -Name BurntToast)) {
+$PayloadJson = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String("__PAYLOAD__"))
+$Payload = $PayloadJson | ConvertFrom-Json
+$Title = [string]$Payload.title
+$Message = [string]$Payload.message
+$OpenUrl = [string]$Payload.open_url
+$UseBurntToast = [bool]$Payload.use_burnt_toast
+if ([string]::IsNullOrWhiteSpace($Message)) {
+  $Message = "Hermes approval request"
+}
+if ($UseBurntToast -and (Get-Module -ListAvailable -Name BurntToast)) {
   Import-Module BurntToast
   if ($OpenUrl) {
     $button = New-BTButton -Content "Open Hermes" -Arguments $OpenUrl -ActivationType Protocol
@@ -636,7 +656,7 @@ $notify.ShowBalloonTip(10000)
 Start-Sleep -Seconds 10
 $notify.Dispose()
 Write-Output "method=windows_balloon"
-'''
+'''.replace("__PAYLOAD__", payload)
     result = _run_notification_command(
         [
             powershell,
@@ -645,10 +665,6 @@ Write-Output "method=windows_balloon"
             "Bypass",
             "-Command",
             script,
-            title,
-            body,
-            open_url,
-            "1" if use_burnt_toast else "0",
         ],
         timeout=15,
     )
