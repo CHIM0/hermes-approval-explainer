@@ -64,8 +64,14 @@ max_bullet_chars: 45
 max_tokens: 260
 temperature: 0.1
 timeout: 8
+llm_wall_timeout: 8
 provider: ""
 model: ""
+provider_extra_body:
+  xiaomi:
+    thinking:
+      type: disabled
+    top_p: 0.95
 include_session_metadata: false
 skip_repeated_after_accept: true
 print_to_stderr: true
@@ -84,6 +90,17 @@ desktop_notification:
 ```
 
 `provider` and `model` are optional. Empty values use Hermes' active model.
+
+`provider_extra_body` applies request-body extras only when the active or
+configured provider matches the key. The default `xiaomi` entry disables MiMo
+thinking for this short approval-explanation call and adds
+`max_completion_tokens` from `max_tokens` at runtime. Other providers, including
+DeepSeek, do not receive these MiMo-specific fields.
+
+`timeout` is passed to Hermes' plugin LLM call. `llm_wall_timeout` is the
+plugin's own hard wall-clock limit for the whole explanation call. If the LLM
+or Hermes auxiliary fallback chain takes longer, the plugin immediately uses
+the local rule-based fallback explanation so the approval prompt is not delayed.
 
 `print_to_stderr` controls whether the full explanation is printed to the
 terminal. Set it to `false` if you want desktop notifications and logs only.

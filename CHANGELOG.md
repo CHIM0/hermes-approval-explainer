@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.1
+
+- Add `llm_wall_timeout` so slow auxiliary-model fallback does not block the approval prompt.
+- Add provider-scoped `provider_extra_body`, including MiMo/Xiaomi defaults that disable thinking for short approval explanations without sending MiMo fields to other models.
+
 ## 1.1
 
 - Add macOS and Windows desktop notifications for approval explanations.

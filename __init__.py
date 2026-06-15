@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import re
 import shlex
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from collections import OrderedDict
 from datetime import datetime
@@ -31,8 +33,15 @@ DEFAULT_CONFIG = {
     "max_tokens": 260,
     "temperature": 0.1,
     "timeout": 8,
+    "llm_wall_timeout": 8,
     "provider": "",
     "model": "",
+    "provider_extra_body": {
+        "xiaomi": {
+            "thinking": {"type": "disabled"},
+            "top_p": 0.95,
+        },
+    },
     "include_session_metadata": False,
     "skip_repeated_after_accept": True,
     "print_to_stderr": True,
@@ -121,6 +130,7 @@ def _capture_turn_context(
     session_id: str = "",
     user_message: str = "",
     model: str = "",
+    provider: str = "",
     platform: str = "",
     **kwargs,
 ):
@@ -130,6 +140,8 @@ def _capture_turn_context(
         key,
         {
             "user_message": _redact_and_truncate(user_message, MAX_MESSAGE_CHARS),
+            "provider": _redact_and_truncate(provider, 80),
+            "model": _redact_and_truncate(model, 120),
         },
     )
     return None
@@ -242,38 +254,11 @@ def _explain_approval_request(
 
     explanation = _fallback_explanation(facts)
     llm_error = None
-    try:
-        result = ctx.llm.complete(
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        f"你是 Hermes 的授权说明助手。用{config['language']}，面向不懂命令行的用户。"
-                        "只基于输入事实，解释：为什么 agent 要调用这个工具、为什么 Hermes 判定危险、"
-                        "用户批准前应检查什么。不要决定是否批准，不要说命令已经执行。"
-                        f"输出 {config['bullet_count']} 条短项目符号，每条不超过 "
-                        f"{config['max_bullet_chars']} 个字符。"
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": (
-                        "请简短解释这次授权请求：\n"
-                        + json.dumps(facts, ensure_ascii=False, indent=2)
-                    ),
-                },
-            ],
-            max_tokens=int(config["max_tokens"]),
-            temperature=float(config["temperature"]),
-            timeout=int(config["timeout"]),
-            provider=config["provider"] or None,
-            model=config["model"] or None,
-            purpose="approval-explainer.pre_approval_request",
-        )
-        if getattr(result, "text", None):
-            explanation = result.text.strip()
-    except Exception as exc:
-        llm_error = f"{type(exc).__name__}: {exc}"
+    text, llm_error, llm_meta = _complete_explanation_with_wall_timeout(
+        ctx, facts, config, turn_context
+    )
+    if text:
+        explanation = text
 
     payload = {
         "timestamp": datetime.now().isoformat(timespec="seconds"),
@@ -285,6 +270,7 @@ def _explain_approval_request(
         "session_key": session_key,
         "explanation": explanation,
         "llm_error": llm_error,
+        "llm_request": llm_meta,
         "model_action_context": assistant_action_context,
         "elapsed_ms": int((time.monotonic() - started) * 1000),
     }
@@ -306,6 +292,153 @@ def _explain_approval_request(
     if config["print_to_stderr"] or should_fallback_to_stderr:
         _display_explanation(explanation, surface)
     return None
+
+
+def _complete_explanation_with_wall_timeout(
+    ctx,
+    facts: dict[str, Any],
+    config: dict[str, Any],
+    turn_context: dict[str, Any] | None,
+) -> tuple[str | None, str | None, dict[str, Any]]:
+    """Cap approval latency even when Hermes' auxiliary fallback chain is slow."""
+    wall_timeout = _positive_float(config.get("llm_wall_timeout"), fallback=8.0)
+    extra_body, llm_meta = _provider_extra_body(config, turn_context)
+    messages = _explanation_messages(facts, config)
+    result_queue: queue.Queue[tuple[str | None, str | None, dict[str, Any]]] = queue.Queue(maxsize=1)
+
+    def worker() -> None:
+        try:
+            if extra_body:
+                result = _complete_with_extra_body(ctx, messages, config, extra_body)
+            else:
+                result = ctx.llm.complete(
+                    messages=messages,
+                    max_tokens=int(config["max_tokens"]),
+                    temperature=float(config["temperature"]),
+                    timeout=int(config["timeout"]),
+                    provider=config["provider"] or None,
+                    model=config["model"] or None,
+                    purpose="approval-explainer.pre_approval_request",
+                )
+            text = result.text.strip() if getattr(result, "text", None) else None
+            result_queue.put_nowait((text, None, llm_meta))
+        except Exception as exc:
+            result_queue.put_nowait((None, f"{type(exc).__name__}: {exc}", llm_meta))
+
+    thread = threading.Thread(
+        target=worker,
+        name="approval-explainer-llm",
+        daemon=True,
+    )
+    thread.start()
+    try:
+        return result_queue.get(timeout=wall_timeout)
+    except queue.Empty:
+        return None, f"TimeoutError: explanation LLM exceeded {wall_timeout:.1f}s wall timeout", llm_meta
+
+
+def _explanation_messages(facts: dict[str, Any], config: dict[str, Any]) -> list[dict[str, str]]:
+    return [
+        {
+            "role": "system",
+            "content": (
+                f"你是 Hermes 的授权说明助手。用{config['language']}，面向不懂命令行的用户。"
+                "只基于输入事实，解释：为什么 agent 要调用这个工具、为什么 Hermes 判定危险、"
+                "用户批准前应检查什么。不要决定是否批准，不要说命令已经执行。"
+                f"输出 {config['bullet_count']} 条短项目符号，每条不超过 "
+                f"{config['max_bullet_chars']} 个字符。"
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                "请简短解释这次授权请求：\n"
+                + json.dumps(facts, ensure_ascii=False, indent=2)
+            ),
+        },
+    ]
+
+
+def _provider_extra_body(
+    config: dict[str, Any],
+    turn_context: dict[str, Any] | None,
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    provider = str(config.get("provider") or (turn_context or {}).get("provider") or "").strip().lower()
+    model = str(config.get("model") or (turn_context or {}).get("model") or "").strip().lower()
+    if not provider and model.startswith("mimo"):
+        provider = "xiaomi"
+    provider_extra = config.get("provider_extra_body")
+    if not isinstance(provider_extra, dict):
+        return None, {"provider": provider, "model": model, "extra_body": "disabled"}
+    extra = provider_extra.get(provider)
+    if not isinstance(extra, dict) or not extra:
+        return None, {"provider": provider, "model": model, "extra_body": "not_configured"}
+    body = _merge_config_value({}, extra)
+    if provider == "xiaomi" and "max_completion_tokens" not in body:
+        body["max_completion_tokens"] = int(config["max_tokens"])
+    return body, {
+        "provider": provider,
+        "model": model,
+        "extra_body": "provider_scoped",
+        "extra_body_keys": sorted(body.keys()),
+    }
+
+
+def _complete_with_extra_body(
+    ctx,
+    messages: list[dict[str, str]],
+    config: dict[str, Any],
+    extra_body: dict[str, Any],
+):
+    """Use Hermes' auxiliary client only for provider-scoped request extras.
+
+    The public plugin LLM API does not expose extra_body yet. This path is kept
+    narrow so non-MiMo providers continue using ctx.llm.complete unchanged.
+    """
+    from agent.auxiliary_client import call_llm
+    from agent.plugin_llm import _check_overrides
+
+    policy = ctx.llm._policy_loader(ctx.llm._plugin_id)
+    provider, model, _, _ = _check_overrides(
+        policy,
+        requested_provider=config["provider"] or None,
+        requested_model=config["model"] or None,
+        requested_agent_id=None,
+        requested_profile=None,
+    )
+
+    response = call_llm(
+        task=None,
+        provider=provider,
+        model=model,
+        messages=messages,
+        temperature=float(config["temperature"]),
+        max_tokens=int(config["max_tokens"]),
+        timeout=int(config["timeout"]),
+        extra_body=extra_body,
+    )
+
+    class Result:
+        pass
+
+    result = Result()
+    result.text = _extract_llm_text(response)
+    return result
+
+
+def _extract_llm_text(response: Any) -> str:
+    try:
+        return response.choices[0].message.content or ""
+    except Exception:
+        return ""
+
+
+def _positive_float(value: Any, fallback: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return fallback
+    return parsed if parsed > 0 else fallback
 
 
 def _compact_facts(

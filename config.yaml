@@ -18,8 +18,19 @@ max_bullet_chars: 45
 max_tokens: 260
 temperature: 0.1
 timeout: 8
+llm_wall_timeout: 8
 provider: ""
 model: ""
+
+# Provider-scoped request extras. These are only applied when the active or
+# configured provider matches the key, so MiMo-specific fields are not sent to
+# DeepSeek or other models.
+provider_extra_body:
+  xiaomi:
+    thinking:
+      type: disabled
+    top_p: 0.95
+
 include_session_metadata: false
 skip_repeated_after_accept: true
 print_to_stderr: true
