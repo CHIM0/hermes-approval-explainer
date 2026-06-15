@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.4
+
+- Document optional notification dependencies for macOS and Windows.
+
 ## 1.1.3
 
 - Fix Windows notification argument passing so balloon fallback receives a non-empty message.

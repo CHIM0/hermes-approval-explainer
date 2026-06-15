@@ -111,10 +111,22 @@ activate Hermes Desktop. It falls back to built-in `osascript` notifications
 when `terminal-notifier` is unavailable, but those fallback notifications do
 not provide a reliable click action.
 
+Install the recommended macOS notification backend:
+
+```bash
+brew install terminal-notifier
+```
+
 On Windows, the plugin uses PowerShell. If the optional `BurntToast` module is
 installed, the notification includes an "Open Hermes" protocol button using
 `open_url`. Without BurntToast, it falls back to a basic Windows balloon
 notification without a reliable click action.
+
+Install the recommended Windows notification backend:
+
+```powershell
+Install-Module BurntToast -Scope CurrentUser -Force
+```
 
 `open_url` defaults to `hermes://`, which can wake the registered Hermes
 Desktop app. Hermes Desktop currently does not expose a public deep link for a
