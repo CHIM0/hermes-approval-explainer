@@ -119,8 +119,9 @@ brew install terminal-notifier
 
 On Windows, the plugin uses PowerShell. If the optional `BurntToast` module is
 installed, the notification includes an "Open Hermes" protocol button using
-`open_url`. Without BurntToast, it falls back to a basic Windows balloon
-notification without a reliable click action.
+`open_url` only when that URL protocol is registered in Windows. Without
+BurntToast, it falls back to a basic Windows balloon notification without a
+reliable click action.
 
 Install the recommended Windows notification backend:
 
@@ -132,6 +133,11 @@ Install-Module BurntToast -Scope CurrentUser -Force
 Desktop app. Hermes Desktop currently does not expose a public deep link for a
 specific approval request, so the notification opens the app rather than
 jumping to a specific approval row.
+
+If clicking the Windows notification says no app can open `hermes://`, Hermes
+Desktop has not registered that URL protocol on that machine. The plugin will
+still show the notification, but it will suppress the broken button and record
+`click_action: "open_url_unregistered"` in the JSONL log.
 
 If you pin a provider or model, Hermes requires an explicit trust gate in
 `~/.hermes/config.yaml`:

@@ -636,13 +636,32 @@ if ([string]::IsNullOrWhiteSpace($Message)) {
 }
 if ($UseBurntToast -and (Get-Module -ListAvailable -Name BurntToast)) {
   Import-Module BurntToast
+  $ClickAction = "none"
+  $ProtocolRegistered = $false
   if ($OpenUrl) {
+    try {
+      $Scheme = ([System.Uri]$OpenUrl).Scheme
+      $ProtocolKey = "Registry::HKEY_CLASSES_ROOT\$Scheme"
+      if (Test-Path $ProtocolKey) {
+        $ProtocolValue = (Get-ItemProperty -Path $ProtocolKey -Name "URL Protocol" -ErrorAction SilentlyContinue)
+        $ProtocolRegistered = $null -ne $ProtocolValue
+      }
+    } catch {
+      $ProtocolRegistered = $false
+    }
+  }
+  if ($OpenUrl -and $ProtocolRegistered) {
     $button = New-BTButton -Content "Open Hermes" -Arguments $OpenUrl -ActivationType Protocol
     New-BurntToastNotification -Text $Title, $Message -Button $button
+    $ClickAction = "open_url_button"
   } else {
     New-BurntToastNotification -Text $Title, $Message
+    if ($OpenUrl) {
+      $ClickAction = "open_url_unregistered"
+    }
   }
   Write-Output "method=burnt_toast"
+  Write-Output "click_action=$ClickAction"
   exit 0
 }
 Add-Type -AssemblyName System.Windows.Forms
@@ -656,6 +675,7 @@ $notify.ShowBalloonTip(10000)
 Start-Sleep -Seconds 10
 $notify.Dispose()
 Write-Output "method=windows_balloon"
+Write-Output "click_action=none"
 '''.replace("__PAYLOAD__", payload)
     result = _run_notification_command(
         [
@@ -671,14 +691,23 @@ Write-Output "method=windows_balloon"
     stdout = str(result.get("stdout") or "")
     if "method=burnt_toast" in stdout:
         result["method"] = "burnt_toast"
-        result["click_action"] = "open_url_button" if open_url else "none"
+        result["click_action"] = _notification_stdout_value(stdout, "click_action") or "unknown"
     elif "method=windows_balloon" in stdout:
         result["method"] = "windows_balloon"
-        result["click_action"] = "none"
+        result["click_action"] = _notification_stdout_value(stdout, "click_action") or "none"
     else:
         result["method"] = "powershell"
         result["click_action"] = "unknown"
     return result
+
+
+def _notification_stdout_value(stdout: str, key: str) -> str:
+    prefix = key + "="
+    for line in stdout.splitlines():
+        line = line.strip()
+        if line.startswith(prefix):
+            return line[len(prefix) :].strip()
+    return ""
 
 
 def _run_notification_command(args: list[str], timeout: float = 5) -> dict[str, Any]:

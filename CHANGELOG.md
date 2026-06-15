@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.5
+
+- Suppress the Windows BurntToast "Open Hermes" button when `open_url` uses an unregistered URL protocol.
+- Record Windows notification click behavior as `open_url_button`, `open_url_unregistered`, or `none`.
+
 ## 1.1.4
 
 - Document optional notification dependencies for macOS and Windows.
