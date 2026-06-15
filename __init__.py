@@ -6,6 +6,8 @@ import json
 import os
 import re
 import shlex
+import shutil
+import subprocess
 import sys
 import time
 from collections import OrderedDict
@@ -33,6 +35,21 @@ DEFAULT_CONFIG = {
     "model": "",
     "include_session_metadata": False,
     "skip_repeated_after_accept": True,
+    "print_to_stderr": True,
+    "desktop_notification": {
+        "enabled": True,
+        "title": "Hermes 请求授权",
+        "open_url": "hermes://",
+        "message_chars": 180,
+        "fallback_to_stderr": True,
+        "macos": {
+            "prefer_terminal_notifier": True,
+            "activate_bundle_id": "com.nousresearch.hermes",
+        },
+        "windows": {
+            "prefer_burnt_toast": True,
+        },
+    },
 }
 
 _turn_cache: OrderedDict[str, dict[str, Any]] = OrderedDict()
@@ -271,9 +288,23 @@ def _explain_approval_request(
         "model_action_context": assistant_action_context,
         "elapsed_ms": int((time.monotonic() - started) * 1000),
     }
+    notification = _send_desktop_notification(
+        explanation=explanation,
+        command=command,
+        description=description,
+        config=config,
+    )
+    payload["notification"] = notification
     _set_last_explanation(payload)
     _write_log("pre_approval_explanation", payload)
-    _display_explanation(explanation, surface)
+    notification_cfg = _desktop_notification_config(config)
+    should_fallback_to_stderr = (
+        notification.get("status") != "disabled"
+        and not notification.get("ok")
+        and notification_cfg.get("fallback_to_stderr")
+    )
+    if config["print_to_stderr"] or should_fallback_to_stderr:
+        _display_explanation(explanation, surface)
     return None
 
 
@@ -369,6 +400,150 @@ def _display_explanation(text: str, surface: str) -> None:
         )
 
 
+def _send_desktop_notification(
+    explanation: str,
+    command: str,
+    description: str,
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    notify_config = _desktop_notification_config(config)
+    if not notify_config.get("enabled"):
+        return {"ok": False, "status": "disabled"}
+
+    title = str(notify_config.get("title") or "Hermes 请求授权")
+    body = _notification_body(
+        explanation=explanation,
+        command=command,
+        description=description,
+        max_chars=int(notify_config.get("message_chars") or 180),
+    )
+
+    if sys.platform == "darwin":
+        return _notify_macos(title, body, notify_config)
+    if sys.platform.startswith("win"):
+        return _notify_windows(title, body, notify_config)
+    return {"ok": False, "status": "unsupported_platform", "platform": sys.platform}
+
+
+def _desktop_notification_config(config: dict[str, Any]) -> dict[str, Any]:
+    value = config.get("desktop_notification")
+    return value if isinstance(value, dict) else {}
+
+
+def _notification_body(
+    explanation: str,
+    command: str,
+    description: str,
+    max_chars: int,
+) -> str:
+    cleaned = re.sub(r"^\s*[-*]\s*", "", explanation.strip(), flags=re.MULTILINE)
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    if not cleaned:
+        cleaned = f"{description}: {command}"
+    return _redact_and_truncate(cleaned, max(60, max_chars))
+
+
+def _notify_macos(title: str, body: str, config: dict[str, Any]) -> dict[str, Any]:
+    macos_config = config.get("macos") if isinstance(config.get("macos"), dict) else {}
+    notifier = shutil.which("terminal-notifier")
+    if macos_config.get("prefer_terminal_notifier", True) and notifier:
+        args = [notifier, "-title", title, "-message", body]
+        bundle_id = str(macos_config.get("activate_bundle_id") or "").strip()
+        open_url = str(config.get("open_url") or "").strip()
+        if bundle_id:
+            args.extend(["-activate", bundle_id])
+        elif open_url:
+            args.extend(["-open", open_url])
+        result = _run_notification_command(args)
+        if result["ok"]:
+            result["method"] = "terminal-notifier"
+            result["click_action"] = "activate_app" if bundle_id else "open_url"
+            return result
+
+    script = (
+        f"display notification {_applescript_string(body)} "
+        f"with title {_applescript_string(title)}"
+    )
+    result = _run_notification_command(["osascript", "-e", script])
+    result["method"] = "osascript"
+    result["click_action"] = "none"
+    return result
+
+
+def _notify_windows(title: str, body: str, config: dict[str, Any]) -> dict[str, Any]:
+    powershell = shutil.which("powershell") or shutil.which("pwsh")
+    if not powershell:
+        return {"ok": False, "status": "missing_powershell"}
+
+    windows_config = config.get("windows") if isinstance(config.get("windows"), dict) else {}
+    open_url = str(config.get("open_url") or "").strip()
+    use_burnt_toast = bool(windows_config.get("prefer_burnt_toast", True))
+    script = r'''
+param([string]$Title, [string]$Message, [string]$OpenUrl, [string]$UseBurntToast)
+$ErrorActionPreference = "Stop"
+if ($UseBurntToast -eq "1" -and (Get-Module -ListAvailable -Name BurntToast)) {
+  Import-Module BurntToast
+  if ($OpenUrl) {
+    $button = New-BTButton -Content "Open Hermes" -Arguments $OpenUrl -ActivationType Protocol
+    New-BurntToastNotification -Text $Title, $Message -Button $button
+  } else {
+    New-BurntToastNotification -Text $Title, $Message
+  }
+  exit 0
+}
+Add-Type -AssemblyName System.Windows.Forms
+$notify = New-Object System.Windows.Forms.NotifyIcon
+$notify.Icon = [System.Drawing.SystemIcons]::Information
+$notify.BalloonTipTitle = $Title
+$notify.BalloonTipText = $Message
+$notify.Visible = $true
+$notify.ShowBalloonTip(10000)
+Start-Sleep -Milliseconds 700
+$notify.Dispose()
+'''
+    result = _run_notification_command(
+        [
+            powershell,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            script,
+            title,
+            body,
+            open_url,
+            "1" if use_burnt_toast else "0",
+        ]
+    )
+    result["method"] = "powershell"
+    result["click_action"] = "open_url_button" if open_url and use_burnt_toast else "none"
+    return result
+
+
+def _run_notification_command(args: list[str]) -> dict[str, Any]:
+    try:
+        completed = subprocess.run(
+            args,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+            check=False,
+        )
+    except FileNotFoundError:
+        return {"ok": False, "status": "missing_command", "command": Path(args[0]).name}
+    except Exception as exc:
+        return {"ok": False, "status": "error", "error": f"{type(exc).__name__}: {exc}"}
+    return {
+        "ok": completed.returncode == 0,
+        "status": "sent" if completed.returncode == 0 else "failed",
+        "returncode": completed.returncode,
+    }
+
+
+def _applescript_string(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 def _fallback_explanation(facts: dict[str, Any]) -> str:
     risks = facts.get("risks") or []
     risk_text = "；".join(risk.get("summary", "") for risk in risks if risk.get("summary"))
@@ -407,8 +582,17 @@ def _load_config() -> dict[str, Any]:
         return config
     for key in config:
         if key in loaded:
-            config[key] = loaded[key]
+            config[key] = _merge_config_value(config[key], loaded[key])
     return config
+
+
+def _merge_config_value(default: Any, loaded: Any) -> Any:
+    if isinstance(default, dict) and isinstance(loaded, dict):
+        merged = default.copy()
+        for key, value in loaded.items():
+            merged[key] = _merge_config_value(merged.get(key), value)
+        return merged
+    return loaded
 
 
 def _risk_summary(key: str) -> dict[str, str]:

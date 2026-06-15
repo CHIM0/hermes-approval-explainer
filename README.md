@@ -16,6 +16,7 @@ approval decision and the user still responds to the normal approval prompt.
 - Falls back to a local rule-based explanation if the LLM call fails.
 - Skips repeated explanations after the user accepted an equivalent approval in
   the same plugin session.
+- Sends OS desktop notifications on macOS and Windows when available.
 - Logs explanations and approval decisions to JSONL.
 
 ## Installation
@@ -67,9 +68,41 @@ provider: ""
 model: ""
 include_session_metadata: false
 skip_repeated_after_accept: true
+print_to_stderr: true
+
+desktop_notification:
+  enabled: true
+  title: "Hermes 请求授权"
+  open_url: "hermes://"
+  message_chars: 180
+  fallback_to_stderr: true
+  macos:
+    prefer_terminal_notifier: true
+    activate_bundle_id: "com.nousresearch.hermes"
+  windows:
+    prefer_burnt_toast: true
 ```
 
 `provider` and `model` are optional. Empty values use Hermes' active model.
+
+`print_to_stderr` controls whether the full explanation is printed to the
+terminal. Set it to `false` if you want desktop notifications and logs only.
+
+`desktop_notification.enabled` controls OS notifications. On macOS, the plugin
+uses `terminal-notifier` when it is installed so clicking the notification can
+activate Hermes Desktop. It falls back to built-in `osascript` notifications
+when `terminal-notifier` is unavailable, but those fallback notifications do
+not provide a reliable click action.
+
+On Windows, the plugin uses PowerShell. If the optional `BurntToast` module is
+installed, the notification includes an "Open Hermes" protocol button using
+`open_url`. Without BurntToast, it falls back to a basic Windows balloon
+notification without a reliable click action.
+
+`open_url` defaults to `hermes://`, which can wake the registered Hermes
+Desktop app. Hermes Desktop currently does not expose a public deep link for a
+specific approval request, so the notification opens the app rather than
+jumping to a specific approval row.
 
 If you pin a provider or model, Hermes requires an explicit trust gate in
 `~/.hermes/config.yaml`:
@@ -130,16 +163,25 @@ Events include:
 - `post_approval_response`
 - `config_error`
 
+`pre_approval_explanation` also records notification status, including the
+method used and whether the OS notification command succeeded.
+
 ## WebUI Note
 
 In the Hermes CLI/TUI, explanations are printed to stderr before the normal
 approval prompt.
 
+In Hermes Desktop, the plugin can additionally send a system notification. This
+does not modify Hermes Desktop or Hermes core, so the explanation is not
+embedded inside the Desktop approval card. The notification can open or
+activate Hermes Desktop when the OS notification backend supports a click
+action.
+
 Independent WebUIs such as `nesquena/hermes-webui` usually display only the
 structured Hermes approval payload, not plugin stderr. For those WebUIs, this
-plugin still writes JSONL logs, but the approval card will not show the
-explanation unless the WebUI is extended to read the log or Hermes core adds an
-`explanation` field to the approval payload.
+plugin still writes JSONL logs and may send OS notifications, but the approval
+card will not show the explanation unless the WebUI is extended to read the log
+or Hermes core adds an `explanation` field to the approval payload.
 
 ## Slash Command
 

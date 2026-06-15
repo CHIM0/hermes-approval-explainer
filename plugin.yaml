@@ -1,5 +1,5 @@
 name: approval-explainer
-version: "0.1.0"
+version: "1.1"
 description: "Explain dangerous command approval requests in Chinese before Hermes asks the user to accept or deny."
 author: "local"
 kind: standalone

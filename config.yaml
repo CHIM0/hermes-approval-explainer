@@ -22,3 +22,16 @@ provider: ""
 model: ""
 include_session_metadata: false
 skip_repeated_after_accept: true
+print_to_stderr: true
+
+desktop_notification:
+  enabled: true
+  title: "Hermes 请求授权"
+  open_url: "hermes://"
+  message_chars: 180
+  fallback_to_stderr: true
+  macos:
+    prefer_terminal_notifier: true
+    activate_bundle_id: "com.nousresearch.hermes"
+  windows:
+    prefer_burnt_toast: true
