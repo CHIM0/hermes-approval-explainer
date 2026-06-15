@@ -87,6 +87,7 @@ desktop_notification:
     activate_bundle_id: "com.nousresearch.hermes"
   windows:
     prefer_burnt_toast: true
+    toast_app_logo: "assets/hermes-logo.png"
 ```
 
 `provider` and `model` are optional. Empty values use Hermes' active model.
@@ -128,6 +129,11 @@ Install the recommended Windows notification backend:
 ```powershell
 Install-Module BurntToast -Scope CurrentUser -Force
 ```
+
+The bundled `assets/hermes-logo.png` is used as the BurntToast app logo by
+default. Set `desktop_notification.windows.toast_app_logo` to another absolute
+path, relative plugin path, or an empty string if you want Windows to use its
+default notification icon.
 
 `open_url` defaults to `hermes://`, which can wake the registered Hermes
 Desktop app. Hermes Desktop currently does not expose a public deep link for a

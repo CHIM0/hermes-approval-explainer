@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.6
+
+- Add a bundled Hermes logo for Windows BurntToast notifications.
+- Add `desktop_notification.windows.toast_app_logo` for custom Windows toast logos.
+
 ## 1.1.5
 
 - Suppress the Windows BurntToast "Open Hermes" button when `open_url` uses an unregistered URL protocol.

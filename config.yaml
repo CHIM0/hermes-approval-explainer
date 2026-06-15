@@ -46,3 +46,4 @@ desktop_notification:
     activate_bundle_id: "com.nousresearch.hermes"
   windows:
     prefer_burnt_toast: true
+    toast_app_logo: "assets/hermes-logo.png"

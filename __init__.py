@@ -58,6 +58,7 @@ DEFAULT_CONFIG = {
         },
         "windows": {
             "prefer_burnt_toast": True,
+            "toast_app_logo": "assets/hermes-logo.png",
         },
     },
 }
@@ -612,6 +613,7 @@ def _notify_windows(title: str, body: str, config: dict[str, Any]) -> dict[str, 
     windows_config = config.get("windows") if isinstance(config.get("windows"), dict) else {}
     open_url = str(config.get("open_url") or "").strip()
     use_burnt_toast = bool(windows_config.get("prefer_burnt_toast", True))
+    toast_app_logo = _resolve_plugin_path(windows_config.get("toast_app_logo", ""))
     payload = base64.b64encode(
         json.dumps(
             {
@@ -619,6 +621,7 @@ def _notify_windows(title: str, body: str, config: dict[str, Any]) -> dict[str, 
                 "message": body,
                 "open_url": open_url,
                 "use_burnt_toast": use_burnt_toast,
+                "toast_app_logo": toast_app_logo,
             },
             ensure_ascii=False,
         ).encode("utf-8")
@@ -631,6 +634,7 @@ $Title = [string]$Payload.title
 $Message = [string]$Payload.message
 $OpenUrl = [string]$Payload.open_url
 $UseBurntToast = [bool]$Payload.use_burnt_toast
+$AppLogo = [string]$Payload.toast_app_logo
 if ([string]::IsNullOrWhiteSpace($Message)) {
   $Message = "Hermes approval request"
 }
@@ -638,6 +642,10 @@ if ($UseBurntToast -and (Get-Module -ListAvailable -Name BurntToast)) {
   Import-Module BurntToast
   $ClickAction = "none"
   $ProtocolRegistered = $false
+  $ToastParams = @{ Text = @($Title, $Message) }
+  if ($AppLogo -and (Test-Path $AppLogo)) {
+    $ToastParams.AppLogo = $AppLogo
+  }
   if ($OpenUrl) {
     try {
       $Scheme = ([System.Uri]$OpenUrl).Scheme
@@ -652,16 +660,22 @@ if ($UseBurntToast -and (Get-Module -ListAvailable -Name BurntToast)) {
   }
   if ($OpenUrl -and $ProtocolRegistered) {
     $button = New-BTButton -Content "Open Hermes" -Arguments $OpenUrl -ActivationType Protocol
-    New-BurntToastNotification -Text $Title, $Message -Button $button
+    $ToastParams.Button = $button
+    New-BurntToastNotification @ToastParams
     $ClickAction = "open_url_button"
   } else {
-    New-BurntToastNotification -Text $Title, $Message
+    New-BurntToastNotification @ToastParams
     if ($OpenUrl) {
       $ClickAction = "open_url_unregistered"
     }
   }
   Write-Output "method=burnt_toast"
   Write-Output "click_action=$ClickAction"
+  if ($AppLogo -and (Test-Path $AppLogo)) {
+    Write-Output "app_logo=custom"
+  } else {
+    Write-Output "app_logo=default"
+  }
   exit 0
 }
 Add-Type -AssemblyName System.Windows.Forms
@@ -708,6 +722,16 @@ def _notification_stdout_value(stdout: str, key: str) -> str:
         if line.startswith(prefix):
             return line[len(prefix) :].strip()
     return ""
+
+
+def _resolve_plugin_path(value: Any) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = PLUGIN_DIR / path
+    return str(path)
 
 
 def _run_notification_command(args: list[str], timeout: float = 5) -> dict[str, Any]:
