@@ -39,7 +39,10 @@ desktop_notification:
   enabled: true
   title: "Hermes 请求授权"
   open_url: "hermes://"
-  message_chars: 180
+  # null means the plugin sends the full explanation to the OS notification
+  # backend. The OS may still fold or truncate long notifications visually.
+  # Set a positive integer to re-enable plugin-side truncation.
+  message_chars: null
   fallback_to_stderr: true
   macos:
     prefer_terminal_notifier: true

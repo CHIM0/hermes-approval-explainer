@@ -50,7 +50,7 @@ DEFAULT_CONFIG = {
         "enabled": True,
         "title": "Hermes 请求授权",
         "open_url": "hermes://",
-        "message_chars": 180,
+        "message_chars": None,
         "fallback_to_stderr": True,
         "macos": {
             "prefer_terminal_notifier": True,
@@ -550,7 +550,7 @@ def _send_desktop_notification(
         explanation=explanation,
         command=command,
         description=description,
-        max_chars=int(notify_config.get("message_chars") or 180),
+        max_chars=_notification_message_limit(notify_config.get("message_chars")),
     )
 
     if sys.platform == "darwin":
@@ -569,13 +569,28 @@ def _notification_body(
     explanation: str,
     command: str,
     description: str,
-    max_chars: int,
+    max_chars: int | None,
 ) -> str:
     cleaned = re.sub(r"^\s*[-*]\s*", "", explanation.strip(), flags=re.MULTILINE)
     cleaned = re.sub(r"\s+", " ", cleaned)
     if not cleaned:
         cleaned = f"{description}: {command}"
-    return _redact_and_truncate(cleaned, max(60, max_chars))
+    redacted = _redact_text(cleaned)
+    if max_chars is None:
+        return redacted
+    return _truncate_text(redacted, max(60, max_chars))
+
+
+def _notification_message_limit(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip().lower() in {"", "auto", "full", "none", "null"}:
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
 
 
 def _notify_macos(title: str, body: str, config: dict[str, Any]) -> dict[str, Any]:
@@ -1034,6 +1049,10 @@ def _safe_json(value: Any, max_chars: int) -> str:
 
 
 def _redact_and_truncate(text: str, max_chars: int) -> str:
+    return _truncate_text(_redact_text(text), max_chars)
+
+
+def _redact_text(text: str) -> str:
     redacted = str(text)
     redacted = re.sub(
         r"(?i)(api[_-]?key|token|secret|password|authorization)(['\"]?\s*[:=]\s*['\"]?)[^'\"\s,}]+",
@@ -1042,9 +1061,14 @@ def _redact_and_truncate(text: str, max_chars: int) -> str:
     )
     redacted = re.sub(r"(?i)bearer\s+[a-z0-9._~+/=-]{12,}", "Bearer [REDACTED]", redacted)
     redacted = re.sub(r"\bsk-[A-Za-z0-9_-]{12,}\b", "sk-[REDACTED]", redacted)
-    if len(redacted) <= max_chars:
-        return redacted
-    return redacted[:max_chars] + f"... [truncated {len(redacted) - max_chars} chars]"
+    return redacted
+
+
+def _truncate_text(text: str, max_chars: int) -> str:
+    value = str(text)
+    if len(value) <= max_chars:
+        return value
+    return value[:max_chars] + f"... [truncated {len(value) - max_chars} chars]"
 
 
 def _unknown_risk(key: str) -> dict[str, str]:

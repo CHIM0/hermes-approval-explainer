@@ -80,7 +80,7 @@ desktop_notification:
   enabled: true
   title: "Hermes 请求授权"
   open_url: "hermes://"
-  message_chars: 180
+  message_chars: null
   fallback_to_stderr: true
   macos:
     prefer_terminal_notifier: true
@@ -111,6 +111,11 @@ uses `terminal-notifier` when it is installed so clicking the notification can
 activate Hermes Desktop. It falls back to built-in `osascript` notifications
 when `terminal-notifier` is unavailable, but those fallback notifications do
 not provide a reliable click action.
+
+`desktop_notification.message_chars: null` means the plugin sends the full
+explanation to the OS notification backend. The operating system may still fold
+or visually truncate long notifications. Set `message_chars` to a positive
+integer if you want a plugin-side length limit.
 
 Install the recommended macOS notification backend:
 

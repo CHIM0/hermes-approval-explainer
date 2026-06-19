@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.7
+
+- Stop truncating desktop notification text by default. `message_chars: null`
+  now sends the full explanation to the OS notification backend.
+- Keep positive integer `message_chars` values as an optional plugin-side
+  notification length limit.
+
 ## 1.1.6
 
 - Add a bundled Hermes logo for Windows BurntToast notifications.
